@@ -1,0 +1,25 @@
+name: Clean Yahoo Mail Junk
+
+on:
+  schedule:
+    # Run every 30 minutes, 24/7
+    - cron: '*/30 * * * *'
+  # Allow manual trigger from GitHub UI
+  workflow_dispatch:
+
+jobs:
+  clean_junk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run junk cleaner
+        env:
+          YAHOO_EMAIL: ${{ secrets.YAHOO_EMAIL }}
+          YAHOO_APP_PASSWORD: ${{ secrets.YAHOO_APP_PASSWORD }}
+        run: python junk_cleaner.py

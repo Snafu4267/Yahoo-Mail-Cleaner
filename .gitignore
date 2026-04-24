@@ -1,0 +1,26 @@
+# Local/private files - not for GitHub
+*.docx
+.claude/
+.cursor/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Secrets (defense in depth - never commit these)
+.env
+.env.*
+*.pem
+*.key
+credentials.json
