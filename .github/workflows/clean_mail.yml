@@ -2,8 +2,9 @@ name: Clean Yahoo Mail Junk
 
 on:
   schedule:
-    # Run once a day at 09:00 UTC (05:00 ET / 02:00 PT)
-    - cron: '0 9 * * *'
+    # Run once a day at 09:30 UTC = 04:30 CDT (summer) / 03:30 CST (winter)
+    # GitHub Actions cron is UTC only; time drifts 1 hour across DST transitions.
+    - cron: '30 9 * * *'
   # Allow manual trigger from GitHub UI
   workflow_dispatch:
 
