@@ -8,6 +8,7 @@ import imaplib
 import email
 import os
 import sys
+import re
 from email.header import decode_header
 
 # Keywords to match (case-insensitive)
@@ -20,12 +21,23 @@ YAHOO_IMAP = 'imap.mail.yahoo.com'
 YAHOO_PORT = 993
 
 
+def build_keyword_patterns():
+    """Compile boundary-aware keyword regexes to reduce false positives."""
+    patterns = {}
+    for keyword in KEYWORDS:
+        patterns[keyword] = re.compile(rf'\b{re.escape(keyword)}\b', re.IGNORECASE)
+    return patterns
+
+
+KEYWORD_PATTERNS = build_keyword_patterns()
+
+
 def get_text(msg_part):
     """Extract text from email part, decode if needed."""
     try:
         if msg_part.get_content_type() == 'text/plain':
             return msg_part.get_payload(decode=True).decode('utf-8', errors='ignore')
-    except:
+    except Exception:
         pass
     return ''
 
@@ -56,16 +68,44 @@ def extract_subject_and_body(msg):
     return subject, body
 
 
-def matches_keyword(text):
-    """Check if text contains any keyword (case-insensitive)."""
-    text_lower = text.lower()
-    for keyword in KEYWORDS:
-        if keyword in text_lower:
+def matches_keyword(text, keywords=None):
+    """Check if text contains any full keyword token (case-insensitive)."""
+    active_keywords = keywords if keywords is not None else KEYWORDS
+    for keyword in active_keywords:
+        pattern = KEYWORD_PATTERNS[keyword]
+        if pattern.search(text):
             return keyword
     return None
 
 
-def delete_from_folder(mail, folder_name, search_subject_only=False):
+def find_junk_folder(mail):
+    """Find Yahoo junk folder by IMAP special-use flags, with safe fallbacks."""
+    candidates = []
+    try:
+        status, data = mail.list()
+        if status == 'OK':
+            for raw in data:
+                if not raw:
+                    continue
+                line = raw.decode('utf-8', errors='ignore')
+                if '\\Junk' in line:
+                    folder = line.rsplit(' "', 1)[-1].rstrip('"')
+                    if folder:
+                        return folder
+                folder = line.rsplit(' "', 1)[-1].rstrip('"')
+                if folder:
+                    candidates.append(folder)
+    except Exception as e:
+        print(f"⚠ Could not inspect folder list: {e}")
+
+    fallbacks = ['Bulk Mail', 'Junk', '[Gmail]/Spam']
+    for name in fallbacks:
+        if name in candidates:
+            return name
+    return 'Bulk Mail'
+
+
+def delete_from_folder(mail, folder_name, search_subject_only=False, keywords=None):
     """
     Search folder for keywords and delete matches.
 
@@ -82,8 +122,8 @@ def delete_from_folder(mail, folder_name, search_subject_only=False):
         if status != 'OK':
             print(f"❌ Could not select {folder_name}")
             return 0, []
-    except:
-        print(f"❌ Error selecting {folder_name}")
+    except Exception as e:
+        print(f"❌ Error selecting {folder_name}: {e}")
         return 0, []
 
     deleted_subjects = []
@@ -92,7 +132,8 @@ def delete_from_folder(mail, folder_name, search_subject_only=False):
         # Search for emails matching keywords
         email_ids = set()
 
-        for keyword in KEYWORDS:
+        active_keywords = keywords if keywords is not None else KEYWORDS
+        for keyword in active_keywords:
             # Search subject
             status, data = mail.search(None, f'(SUBJECT "{keyword}")')
             if status == 'OK' and data[0]:
@@ -120,10 +161,10 @@ def delete_from_folder(mail, folder_name, search_subject_only=False):
                     subject, body = extract_subject_and_body(msg)
 
                     matched_keyword = None
-                    if matches_keyword(subject):
-                        matched_keyword = matches_keyword(subject)
-                    elif matches_keyword(body):
-                        matched_keyword = matches_keyword(body)
+                    if matches_keyword(subject, active_keywords):
+                        matched_keyword = matches_keyword(subject, active_keywords)
+                    elif matches_keyword(body, active_keywords):
+                        matched_keyword = matches_keyword(body, active_keywords)
 
                     if matched_keyword:
                         confirmed_ids.append(email_id)
@@ -178,12 +219,15 @@ def main():
     all_subjects = []
 
     # Scan Junk folder (aggressive: subject + body)
-    count, subjects = delete_from_folder(mail, 'Bulk Mail', search_subject_only=False)
+    junk_folder = find_junk_folder(mail)
+    print(f"  ℹ Using junk folder: {junk_folder}")
+    count, subjects = delete_from_folder(mail, junk_folder, search_subject_only=False, keywords=KEYWORDS)
     total_deleted += count
     all_subjects.extend(subjects)
 
     # Scan Inbox (conservative: subject only)
-    count, subjects = delete_from_folder(mail, 'INBOX', search_subject_only=True)
+    inbox_keywords = [k for k in KEYWORDS if k != 'adult']
+    count, subjects = delete_from_folder(mail, 'INBOX', search_subject_only=True, keywords=inbox_keywords)
     total_deleted += count
     all_subjects.extend(subjects)
 
