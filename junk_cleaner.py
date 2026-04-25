@@ -14,7 +14,7 @@ from email.header import decode_header
 # Keywords to match (case-insensitive)
 KEYWORDS = [
     'sex', 'sexual', 'intercourse', 'adult', 'xxx', 'porn',
-    'erotic', 'naked', 'nude', 'hookup', 'escort', 'onlyfans'
+    'erotic', 'naked', 'nude', 'hookup', 'escort', 'onlyfans', 'fuck'
 ]
 
 YAHOO_IMAP = 'imap.mail.yahoo.com'
@@ -30,6 +30,7 @@ def build_keyword_patterns():
 
 
 KEYWORD_PATTERNS = build_keyword_patterns()
+RE_SUBJECT_PATTERN = re.compile(r'\bre\s*:', re.IGNORECASE)
 
 
 def get_text(msg_part):
@@ -76,6 +77,11 @@ def matches_keyword(text, keywords=None):
         if pattern.search(text):
             return keyword
     return None
+
+
+def matches_subject_rule(subject):
+    """Match subjects like Re:, RE:, Re : etc."""
+    return bool(RE_SUBJECT_PATTERN.search(subject or ''))
 
 
 def find_junk_folder(mail):
@@ -161,7 +167,9 @@ def delete_from_folder(mail, folder_name, search_subject_only=False, keywords=No
                     subject, body = extract_subject_and_body(msg)
 
                     matched_keyword = None
-                    if matches_keyword(subject, active_keywords):
+                    if matches_subject_rule(subject):
+                        matched_keyword = 're:'
+                    elif matches_keyword(subject, active_keywords):
                         matched_keyword = matches_keyword(subject, active_keywords)
                     elif matches_keyword(body, active_keywords):
                         matched_keyword = matches_keyword(body, active_keywords)
