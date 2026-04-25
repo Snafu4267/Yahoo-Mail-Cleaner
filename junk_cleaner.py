@@ -84,9 +84,26 @@ def matches_subject_rule(subject):
     return bool(RE_SUBJECT_PATTERN.search(subject or ''))
 
 
-def find_junk_folder(mail):
-    """Find Yahoo junk folder by IMAP special-use flags, with safe fallbacks."""
-    candidates = []
+def parse_list_folder_name(line):
+    """Extract folder name from an IMAP LIST response line."""
+    # Prefer quoted folder names to preserve spaces.
+    quoted = re.findall(r'"([^"]+)"', line)
+    if quoted:
+        return quoted[-1]
+    # Fallback for unquoted names: take the text after the final delimiter.
+    parts = line.rsplit(') ', 1)
+    if len(parts) == 2:
+        remainder = parts[1].strip()
+        if ' ' in remainder:
+            return remainder.split(' ', 1)[1].strip('"')
+        return remainder.strip('"')
+    return line.strip()
+
+
+def find_junk_folders(mail):
+    """Find all likely junk folders by IMAP flags and common names."""
+    junk_folders = []
+    seen = set()
     try:
         status, data = mail.list()
         if status == 'OK':
@@ -94,21 +111,22 @@ def find_junk_folder(mail):
                 if not raw:
                     continue
                 line = raw.decode('utf-8', errors='ignore')
-                if '\\Junk' in line:
-                    folder = line.rsplit(' "', 1)[-1].rstrip('"')
-                    if folder:
-                        return folder
-                folder = line.rsplit(' "', 1)[-1].rstrip('"')
-                if folder:
-                    candidates.append(folder)
+                folder = parse_list_folder_name(line)
+                if not folder:
+                    continue
+                folder_lower = folder.lower()
+                is_junkish = '\\junk' in line.lower() or any(
+                    token in folder_lower for token in ['junk', 'bulk', 'spam']
+                )
+                if is_junkish and folder not in seen:
+                    junk_folders.append(folder)
+                    seen.add(folder)
     except Exception as e:
         print(f"⚠ Could not inspect folder list: {e}")
 
-    fallbacks = ['Bulk Mail', 'Junk', '[Gmail]/Spam']
-    for name in fallbacks:
-        if name in candidates:
-            return name
-    return 'Bulk Mail'
+    if junk_folders:
+        return junk_folders
+    return ['Bulk Mail', 'Junk']
 
 
 def delete_from_folder(mail, folder_name, search_subject_only=False, keywords=None):
@@ -226,12 +244,15 @@ def main():
     total_deleted = 0
     all_subjects = []
 
-    # Scan Junk folder (aggressive: subject + body)
-    junk_folder = find_junk_folder(mail)
-    print(f"  ℹ Using junk folder: {junk_folder}")
-    count, subjects = delete_from_folder(mail, junk_folder, search_subject_only=False, keywords=KEYWORDS)
-    total_deleted += count
-    all_subjects.extend(subjects)
+    # Scan junk folders (aggressive: subject + body)
+    junk_folders = find_junk_folders(mail)
+    print(f"  ℹ Using junk folders: {', '.join(junk_folders)}")
+    for junk_folder in junk_folders:
+        count, subjects = delete_from_folder(
+            mail, junk_folder, search_subject_only=False, keywords=KEYWORDS
+        )
+        total_deleted += count
+        all_subjects.extend(subjects)
 
     # Scan Inbox (conservative: subject only)
     inbox_keywords = [k for k in KEYWORDS if k != 'adult']
